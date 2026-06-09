@@ -57,7 +57,7 @@
     let isWaitingForButton = false;
     let hasBodyBeenDetectedOnce = false;
 
-    // 🌟 ตัวแปรสำหรับระบบเสียง (ป้องกันบราวเซอร์จำกัดจำนวน AudioContext)
+    // 🌟 ตัวแปรสำหรับระบบเสียง
     let audioCtx = null;
 
     // 2. ระบบ AI MediaPipe 
@@ -65,7 +65,7 @@
         document.getElementById('btnStart').style.display = 'none';
         document.getElementById('statusMsg').innerText = "กำลังเชื่อมต่อกล้อง...";
 
-        // สร้างหน้าต่าง Popup ซ้อนทับวิดีโอ
+        // 🌟 สร้างหน้าต่าง Popup ซ้อนทับวิดีโอ
         if (!document.getElementById('readyPopup')) {
             let popup = document.createElement('div');
             popup.id = 'readyPopup';
@@ -87,37 +87,63 @@
                 <button id="btnStartCountdown" style="background-color: #f59e0b; color: #fff; border: none; padding: 15px 25px; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(245, 158, 11, 0.3);">⏳ เริ่มนับถอยหลัง 5 วิ</button>
             `;
             document.querySelector('.video-container').appendChild(popup);
-
-            // เมื่อกดปุ่มเริ่มนับถอยหลัง
-            document.getElementById('btnStartCountdown').onclick = () => {
-                document.getElementById('readyPopup').style.display = 'none';
-                isWaitingForButton = false;
-                isCountdown = true;
-                countdownValue = 5;
-                
-                // 🎵 โหลดระบบเสียงเตรียมไว้ทันทีที่ผู้ใช้กดปุ่ม (ตามกฎความปลอดภัยของบราวเซอร์)
-                if (!audioCtx) {
-                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                }
-                if (audioCtx.state === 'suspended') {
-                    audioCtx.resume();
-                }
-                
-                // เริ่มทำงานตัวนับเวลา
-                let countdownInterval = setInterval(() => {
-                    if (countdownValue > 1) {
-                        countdownValue--;
-                        document.getElementById('statusMsg').innerText = `⏳ รีบเดินกลับไปยืนจุดเดิม... (${countdownValue} วิ)`;
-                    } else {
-                        clearInterval(countdownInterval);
-                        isCountdown = false; 
-                        isRunning = true; // เปิดโหมดจับท่าทางสควอต
-                        document.getElementById('statusMsg').innerText = "🔥 ลุยเลย! ย่อให้สุด ยืดให้สุด";
-                        document.getElementById('statusMsg').style.color = "#22c55e";
-                    }
-                }, 1000);
-            };
         }
+
+        // 🌟 สร้างตัวเลขนับถอยหลังขนาดยักษ์ (Big Countdown) กลางจอ
+        if (!document.getElementById('bigCountdownDisplay')) {
+            let bigCd = document.createElement('div');
+            bigCd.id = 'bigCountdownDisplay';
+            bigCd.style.position = 'absolute';
+            bigCd.style.top = '50%';
+            bigCd.style.left = '50%';
+            bigCd.style.transform = 'translate(-50%, -50%)';
+            bigCd.style.fontSize = '180px'; // ขนาดใหญ่เบิ้ม!
+            bigCd.style.fontWeight = '900';
+            bigCd.style.color = '#ffffff';
+            bigCd.style.textShadow = '0px 0px 40px #f59e0b, 5px 5px 0px #b45309'; // เรืองแสงสีทอง
+            bigCd.style.zIndex = '20';
+            bigCd.style.display = 'none';
+            bigCd.style.pointerEvents = 'none'; // ไม่ให้ขวางการกดปุ่ม
+            document.querySelector('.video-container').appendChild(bigCd);
+        }
+
+        // เมื่อกดปุ่มเริ่มนับถอยหลัง
+        document.getElementById('btnStartCountdown').onclick = () => {
+            document.getElementById('readyPopup').style.display = 'none';
+            isWaitingForButton = false;
+            isCountdown = true;
+            countdownValue = 5;
+            
+            // โชว์ตัวเลขยักษ์กลางจอ
+            let bigCd = document.getElementById('bigCountdownDisplay');
+            bigCd.style.display = 'block';
+            bigCd.innerText = countdownValue;
+
+            document.getElementById('statusMsg').innerText = `⏳ รีบเดินกลับไปยืนจุดเดิม...`;
+            document.getElementById('statusMsg').style.color = "#fbbf24";
+            
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            
+            // เริ่มทำงานตัวนับเวลา
+            let countdownInterval = setInterval(() => {
+                if (countdownValue > 1) {
+                    countdownValue--;
+                    bigCd.innerText = countdownValue; // อัปเดตตัวเลขยักษ์
+                } else {
+                    clearInterval(countdownInterval);
+                    isCountdown = false; 
+                    isRunning = true; 
+                    bigCd.style.display = 'none'; // ซ่อนเลขยักษ์ตอนเกมเริ่ม
+                    document.getElementById('statusMsg').innerText = "🔥 ลุยเลย! ย่อให้สุด ยืดให้สุด";
+                    document.getElementById('statusMsg').style.color = "#22c55e";
+                }
+            }, 1000);
+        };
 
         const videoElement = document.getElementById('video');
         const canvasElement = document.getElementById('canvas');
@@ -150,12 +176,20 @@
                     ankle = results.poseLandmarks[28];
                 }
 
-                let isVisible = (nose.visibility >= 0.65 && shoulder.visibility >= 0.65 && hip.visibility >= 0.65 && knee.visibility >= 0.65 && ankle.visibility >= 0.65);
+                // ระบบแจ้งเตือนอัจฉริยะ (ลดความเข้มงวดลงเหลือ 0.45)
+                let missingParts = [];
+                if (nose.visibility < 0.45) missingParts.push("ใบหน้า");
+                if (shoulder.visibility < 0.45) missingParts.push("หัวไหล่");
+                if (hip.visibility < 0.45) missingParts.push("สะโพก");
+                if (knee.visibility < 0.45) missingParts.push("หัวเข่า");
+                if (ankle.visibility < 0.45) missingParts.push("ข้อเท้า");
+
+                let isVisible = (missingParts.length === 0);
 
                 // เฟสที่ 1: สแกนหาร่างกายครั้งแรก
                 if (!hasBodyBeenDetectedOnce) {
                     if (!isVisible) {
-                        document.getElementById('statusMsg').innerText = "⚠️ ถอยหลังอีกนิดครับ ให้กล้องเห็นตั้งแต่หัวจรดเท้า";
+                        document.getElementById('statusMsg').innerText = "⚠️ ถอยหลังอีกนิด กล้องมองไม่เห็น: " + missingParts.join(", ");
                         document.getElementById('statusMsg').style.color = "#fca5a5"; 
                         canvasCtx.restore();
                         return; 
@@ -178,8 +212,6 @@
 
                 // เฟสที่ 3: กำลังนับถอยหลัง
                 if (isCountdown) {
-                    document.getElementById('statusMsg').innerText = `⏳ รีบเดินกลับไปยืนจุดเดิม... (${countdownValue} วิ)`;
-                    document.getElementById('statusMsg').style.color = "#fbbf24";
                     canvasCtx.restore();
                     return; 
                 }
@@ -192,7 +224,7 @@
 
                 // Anti-Cheat
                 if (!isVisible) {
-                    document.getElementById('statusMsg').innerText = "⚠️ หลุดเฟรม! ถอยหลังให้เห็นเต็มตัวอีกครั้ง";
+                    document.getElementById('statusMsg').innerText = "⚠️ หลุดเฟรม! มองไม่เห็น: " + missingParts.join(", ");
                     document.getElementById('statusMsg').style.color = "#fca5a5"; 
                     canvasCtx.restore();
                     return; 
@@ -218,7 +250,6 @@
                         document.getElementById('statusMsg').innerText = "⬇️ ลึกพอแล้ว! ดันตัวขึ้นเลย!"; 
                         document.getElementById('statusMsg').style.color = "#22c55e"; 
                         
-                        // 🎵 เรียกใช้เสียงตื๊ดจาก AudioContext ที่สร้างไว้แล้ว
                         try {
                             if (audioCtx) {
                                 let osc = audioCtx.createOscillator();
