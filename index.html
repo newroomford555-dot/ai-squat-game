@@ -62,8 +62,11 @@
 
         const pose = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
         pose.setOptions({ modelComplexity: 0, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-        pose.onResults((results) => {
+       pose.onResults((results) => {
             if (!isRunning) return;
+            const canvasElement = document.getElementById('canvas');
+            const canvasCtx = canvasElement.getContext('2d');
+            
             canvasElement.width = canvasElement.clientWidth;
             canvasElement.height = canvasElement.clientHeight;
             canvasCtx.save();
@@ -74,40 +77,87 @@
                 drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#ffffff', lineWidth: 3});
                 drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#6366f1', lineWidth: 2, radius: 4});
 
-                let hip = results.poseLandmarks[23]; let knee = results.poseLandmarks[25]; let ankle = results.poseLandmarks[27];
+                // ดึงจุดข้อต่อที่ต้องใช้งาน
+                let nose = results.poseLandmarks[0];
+                let shoulder = results.poseLandmarks[11]; // ไหล่ซ้าย
+                let hip = results.poseLandmarks[23];      // สะโพกซ้าย
+                let knee = results.poseLandmarks[25];     // เข่าซ้าย
+                let ankle = results.poseLandmarks[27];    // ข้อเท้าซ้าย
+                
+                // ถ้าฝั่งขวาชัดกว่า ให้สลับไปใช้ฝั่งขวา
                 if (results.poseLandmarks[24].visibility > results.poseLandmarks[23].visibility) {
-                    hip = results.poseLandmarks[24]; knee = results.poseLandmarks[26]; ankle = results.poseLandmarks[28];
+                    shoulder = results.poseLandmarks[12];
+                    hip = results.poseLandmarks[24]; 
+                    knee = results.poseLandmarks[26]; 
+                    ankle = results.poseLandmarks[28];
                 }
 
-                // 🌟 ระบบป้องกันผีผลัก: เช็คว่ากล้องเห็นข้อต่อ (สะโพก, เข่า, ข้อเท้า) ชัดเจนหรือไม่
-                // ค่า visibility เต็มคือ 1.0 (ถ้าต่ำกว่า 0.6 ถือว่าเห็นไม่ชัด หรือ AI กำลังมั่ว)
-                if (hip.visibility < 0.6 || knee.visibility < 0.6 || ankle.visibility < 0.6) {
-                    document.getElementById('statusMsg').innerText = "⚠️ ถอยหลังนิดนึงครับ ให้กล้องเห็นเต็มตัวถึงข้อเท้า";
-                    document.getElementById('statusMsg').style.color = "#fca5a5"; // แจ้งเตือนสีแดงอ่อน
+                // 🛡️ Anti-Cheat ชั้นที่ 1: ต้องเห็นเต็มตัวตั้งแต่ จมูก ถึง ข้อเท้า (ค่าความชัดต้องเกิน 65%)
+                if (nose.visibility < 0.65 || shoulder.visibility < 0.65 || hip.visibility < 0.65 || knee.visibility < 0.65 || ankle.visibility < 0.65) {
+                    document.getElementById('statusMsg').innerText = "⚠️ ถอยหลังอีกนิดครับ ให้กล้องเห็นตั้งแต่หัวจรดเท้า";
+                    document.getElementById('statusMsg').style.color = "#fca5a5"; 
                     canvasCtx.restore();
-                    return; // หยุดการทำงานส่วนคำนวณองศาทันที ถ้ายืนไม่เต็มตัว
+                    return; 
                 }
 
+                // 🛡️ Anti-Cheat ชั้นที่ 2: ป้องกันการนั่งเล่น หรือนอนเขย่า 
+                // (แกน Y บนจอคือ 0 ด้านล่างคือ 1 ดังนั้นจมูกและไหล่ต้องค่าน้อยกว่าสะโพกเสมอ)
+                if (nose.y >= hip.y || shoulder.y >= hip.y) {
+                    document.getElementById('statusMsg').innerText = "⚠️ ไม่เนียนครับ! ลุกขึ้นยืนตรงๆ ให้กล้องเห็นชัดๆ";
+                    document.getElementById('statusMsg').style.color = "#fca5a5"; 
+                    canvasCtx.restore();
+                    return; 
+                }
+
+                // คำนวณองศาข้อเข่า
                 let angle = Math.abs((Math.atan2(ankle.y - knee.y, ankle.x - knee.x) - Math.atan2(hip.y - knee.y, hip.x - knee.x)) * 180.0 / Math.PI);
                 if (angle > 180.0) angle = 360 - angle;
 
-                if (angle < 95 && hip.y >= knee.y - 0.1) {
+                // 🛡️ Anti-Cheat ชั้นที่ 3: ตัวแปรจับเวลาป้องกันการเขย่าแบบเดอะแฟลช
+                window.lastRepTime = window.lastRepTime || 0;
+                let currentTime = new Date().getTime();
+
+                // ⬇️ จังหวะย่อตัว (Deep Squat)
+                if (angle < 95 && hip.y >= knee.y - 0.15) {
                     if (state === 'up') { 
                         state = 'down'; 
-                        document.getElementById('statusMsg').innerText = "⬇️ ลงได้สวย! ดันตัวขึ้นเลย!"; 
+                        document.getElementById('statusMsg').innerText = "⬇️ ลึกพอแล้ว! ดันตัวขึ้นเลย!"; 
                         document.getElementById('statusMsg').style.color = "#22c55e"; 
+                        
+                        // 🎵 โบนัส: ส่งเสียงตื๊ดสั้นๆ ให้รู้ว่าย่อลงถึงจุดที่ AI ยอมรับแล้ว
+                        try {
+                            let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                            let osc = audioCtx.createOscillator();
+                            osc.type = 'sine';
+                            osc.frequency.setValueAtTime(600, audioCtx.currentTime); // โทนเสียงความถี่ 600Hz
+                            osc.connect(audioCtx.destination);
+                            osc.start();
+                            osc.stop(audioCtx.currentTime + 0.15); // ดังแค่ 0.15 วินาที
+                        } catch(e) {}
                     }
-                } else if (angle > 160) {
+                } 
+                // ⬆️ จังหวะยืนขึ้น (ต้องยืนให้ตรง และสะโพกต้องเด้งกลับไปสูงกว่าเข่า)
+                else if (angle > 160 && hip.y < knee.y - 0.2) { 
                     if (state === 'down') {
-                        state = 'up';
-                        counter++;
-                        document.getElementById('counter').innerHTML = counter + `<span style="font-size: 20px; color:#94a3b8;">/${SQUAT_TARGET}</span>`;
-                        document.getElementById('statusMsg').innerText = "⬆️ เยี่ยม! ทำต่อไป!";
-                        document.getElementById('statusMsg').style.color = "#c7d2fe";
+                        // 🛡️ Anti-Cheat ชั้นที่ 4: ความเร็ว (คนจริงสควอต 1 ครั้งต้องใช้เวลาอย่างน้อย 1 วินาที)
+                        if (currentTime - window.lastRepTime > 1000) {
+                            state = 'up';
+                            counter++;
+                            window.lastRepTime = currentTime; // อัปเดตเวลาที่ทำสำเร็จ
+                            
+                            document.getElementById('counter').innerHTML = counter + `<span style="font-size: 20px; color:#94a3b8;">/${SQUAT_TARGET}</span>`;
+                            document.getElementById('statusMsg').innerText = "⬆️ เยี่ยม! ทำต่อไป!";
+                            document.getElementById('statusMsg').style.color = "#c7d2fe";
 
-                        if (counter >= SQUAT_TARGET) {
-                            isRunning = false;
-                            sendDataToGAS();
+                            if (counter >= SQUAT_TARGET) {
+                                isRunning = false;
+                                sendDataToGAS();
+                            }
+                        } else {
+                            // จับได้ว่านั่งเขย่ามือถือ หรือย่อลุกเร็วผิดมนุษย์
+                            state = 'up'; // บังคับให้เริ่มย่อใหม่ แต่ไม่แจกแต้มให้
+                            document.getElementById('statusMsg').innerText = "⚠️ เร็วไปครับ! ย่อ-ยืด ช้าๆ ให้โดนกล้ามเนื้อ";
+                            document.getElementById('statusMsg').style.color = "#fca5a5";
                         }
                     }
                 }
