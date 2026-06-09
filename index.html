@@ -46,17 +46,67 @@
         document.getElementById('statusMsg').innerText = "ผู้เล่น: " + username;
     }
 
-   const SQUAT_TARGET = 12;
+  const SQUAT_TARGET = 12;
     let counter = 0;
     let state = 'up';
-    let isRunning = false;
-    let isCountdown = false; // 🌟 เพิ่มตัวแปรสถานะนับถอยหลัง
-    let countdownValue = 5;  // 🌟 เวลา 5 วินาที
+    
+    // 🌟 ตัวแปรจัดการสถานะ (State Machine) ของระบบ 4 เฟส
+    let isRunning = false; 
+    let isCountdown = false; 
+    let countdownValue = 5;  
+    let isWaitingForButton = false;
+    let hasBodyBeenDetectedOnce = false;
 
     // 2. ระบบ AI MediaPipe 
     function startGame() {
         document.getElementById('btnStart').style.display = 'none';
         document.getElementById('statusMsg').innerText = "กำลังเชื่อมต่อกล้อง...";
+
+        // 🌟 สร้างหน้าต่าง Popup ซ้อนทับวิดีโอ (สร้างผ่าน JS เพื่อไม่ให้กระทบ HTML เดิม)
+        if (!document.getElementById('readyPopup')) {
+            let popup = document.createElement('div');
+            popup.id = 'readyPopup';
+            popup.style.position = 'absolute';
+            popup.style.top = '0';
+            popup.style.left = '0';
+            popup.style.width = '100%';
+            popup.style.height = '100%';
+            popup.style.backgroundColor = 'rgba(15, 23, 42, 0.85)'; // สีทึบโปร่งแสง
+            popup.style.display = 'none';
+            popup.style.flexDirection = 'column';
+            popup.style.justifyContent = 'center';
+            popup.style.alignItems = 'center';
+            popup.style.zIndex = '10';
+            popup.innerHTML = `
+                <div style="font-size: 50px; margin-bottom: 10px;">🎯</div>
+                <h3 style="color: #4ade80; margin-top: 0; margin-bottom: 10px;">ตำแหน่งเป๊ะแล้ว!</h3>
+                <p style="color: #cbd5e1; font-size: 14px; margin-bottom: 25px; text-align: center; padding: 0 20px;">เดินมากดปุ่มด้านล่างนี้<br>เพื่อเริ่มจับเวลา 5 วินาที</p>
+                <button id="btnStartCountdown" style="background-color: #f59e0b; color: #fff; border: none; padding: 15px 25px; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(245, 158, 11, 0.3);">⏳ เริ่มนับถอยหลัง 5 วิ</button>
+            `;
+            document.querySelector('.video-container').appendChild(popup);
+
+            // เมื่อกดปุ่มเริ่มนับถอยหลัง
+            document.getElementById('btnStartCountdown').onclick = () => {
+                document.getElementById('readyPopup').style.display = 'none';
+                isWaitingForButton = false;
+                isCountdown = true;
+                countdownValue = 5;
+                
+                // เริ่มทำงานตัวนับเวลา
+                let countdownInterval = setInterval(() => {
+                    if (countdownValue > 1) {
+                        countdownValue--;
+                        document.getElementById('statusMsg').innerText = `⏳ รีบเดินกลับไปยืนจุดเดิม... (${countdownValue} วิ)`;
+                    } else {
+                        clearInterval(countdownInterval);
+                        isCountdown = false; 
+                        isRunning = true; // เปิดโหมดจับท่าทางสควอตเต็มตัว!
+                        document.getElementById('statusMsg').innerText = "🔥 ลุยเลย! ย่อให้สุด ยืดให้สุด";
+                        document.getElementById('statusMsg').style.color = "#22c55e";
+                    }
+                }, 1000);
+            };
+        }
 
         const videoElement = document.getElementById('video');
         const canvasElement = document.getElementById('canvas');
@@ -66,7 +116,7 @@
         pose.setOptions({ modelComplexity: 0, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
         
         pose.onResults((results) => {
-            if (!isRunning) return;
+            // วาดโครงกระดูกให้เห็นตลอดเวลา (แม้ตอนยังไม่ได้เริ่มเกม) จะได้กะระยะถูก
             canvasElement.width = canvasElement.clientWidth;
             canvasElement.height = canvasElement.clientHeight;
             canvasCtx.save();
@@ -90,20 +140,54 @@
                     ankle = results.poseLandmarks[28];
                 }
 
-                // 🛡️ Anti-Cheat ชั้นที่ 1: ต้องเห็นเต็มตัวตั้งแต่ จมูก ถึง ข้อเท้า (ทำงานแม้ตอนนับถอยหลัง)
-                if (nose.visibility < 0.65 || shoulder.visibility < 0.65 || hip.visibility < 0.65 || knee.visibility < 0.65 || ankle.visibility < 0.65) {
-                    document.getElementById('statusMsg').innerText = "⚠️ ถอยหลังอีกนิดครับ ให้กล้องเห็นตั้งแต่หัวจรดเท้า";
-                    document.getElementById('statusMsg').style.color = "#fca5a5"; 
+                // เช็คว่าอยู่ในระยะกล้องเห็นครบตั้งแต่หัวจรดเท้าหรือไม่
+                let isVisible = (nose.visibility >= 0.65 && shoulder.visibility >= 0.65 && hip.visibility >= 0.65 && knee.visibility >= 0.65 && ankle.visibility >= 0.65);
+
+                // 🌟 เฟสที่ 1: สแกนหาร่างกายครั้งแรก
+                if (!hasBodyBeenDetectedOnce) {
+                    if (!isVisible) {
+                        document.getElementById('statusMsg').innerText = "⚠️ ถอยหลังอีกนิดครับ ให้กล้องเห็นตั้งแต่หัวจรดเท้า";
+                        document.getElementById('statusMsg').style.color = "#fca5a5"; 
+                        canvasCtx.restore();
+                        return; 
+                    } else {
+                        // พอเห็นเต็มตัวครั้งแรกปุ๊บ เปิด Popup ปุ่มกดทันที
+                        hasBodyBeenDetectedOnce = true;
+                        isWaitingForButton = true;
+                        document.getElementById('readyPopup').style.display = 'flex';
+                        document.getElementById('statusMsg').innerText = "✅ ตำแหน่งเป๊ะแล้ว! เดินมากดปุ่มเริ่มได้เลย";
+                        document.getElementById('statusMsg').style.color = "#4ade80";
+                        canvasCtx.restore();
+                        return;
+                    }
+                }
+
+                // 🌟 เฟสที่ 2: โชว์หน้าต่าง Popup รอผู้ใช้กดปุ่ม (พักการคำนวณ)
+                if (isWaitingForButton) {
+                    canvasCtx.restore();
+                    return;
+                }
+
+                // 🌟 เฟสที่ 3: กำลังนับถอยหลัง 5 วินาที
+                if (isCountdown) {
+                    document.getElementById('statusMsg').innerText = `⏳ รีบเดินกลับไปยืนจุดเดิม... (${countdownValue} วิ)`;
+                    document.getElementById('statusMsg').style.color = "#fbbf24";
                     canvasCtx.restore();
                     return; 
                 }
 
-                // 🌟 ระบบนับถอยหลัง 5 วินาที: ถ้ายืนเข้าเฟรมเต็มตัวแล้ว ให้โชว์เวลานับถอยหลัง
-                if (isCountdown) {
-                    document.getElementById('statusMsg').innerText = `⏳ เตรียมตัว... เริ่มใน ${countdownValue} วินาที`;
-                    document.getElementById('statusMsg').style.color = "#fbbf24";
+                // 🌟 เฟสที่ 4: เกมเริ่ม! (ต้องอยู่ในโหมด isRunning เท่านั้น)
+                if (!isRunning) {
                     canvasCtx.restore();
-                    return; // หยุดคำสั่งนับแต้มไว้ก่อน จนกว่าจะหมดเวลา
+                    return;
+                }
+
+                // 🛡️ Anti-Cheat ชั้นที่ 1: ตรวจเช็คระหว่างเล่นว่าหลุดเฟรมหรือไม่
+                if (!isVisible) {
+                    document.getElementById('statusMsg').innerText = "⚠️ หลุดเฟรม! ถอยหลังให้เห็นเต็มตัวอีกครั้ง";
+                    document.getElementById('statusMsg').style.color = "#fca5a5"; 
+                    canvasCtx.restore();
+                    return; 
                 }
 
                 // 🛡️ Anti-Cheat ชั้นที่ 2: ป้องกันการนั่งเล่น หรือนอนเขย่า 
@@ -121,6 +205,7 @@
                 window.lastRepTime = window.lastRepTime || 0;
                 let currentTime = new Date().getTime();
 
+                // ⬇️ จังหวะย่อตัว
                 if (angle < 95 && hip.y >= knee.y - 0.15) {
                     if (state === 'up') { 
                         state = 'down'; 
@@ -138,6 +223,7 @@
                         } catch(e) {}
                     }
                 } 
+                // ⬆️ จังหวะยืนขึ้น
                 else if (angle > 160 && hip.y < knee.y - 0.2) { 
                     if (state === 'down') {
                         // 🛡️ Anti-Cheat ชั้นที่ 4: ความเร็ว (จำกัดที่ 1 วินาที/ครั้ง)
@@ -165,24 +251,13 @@
             canvasCtx.restore();
         });
 
-        const camera = new Camera(videoElement, { onFrame: async () => { if(isRunning) await pose.send({image: videoElement}); }, width: 480, height: 640, facingMode: "user" });
+        // 🌟 แก้ไขจุดนี้: สั่งให้กล้องส่งภาพไปให้ AI ประมวลผลตลอดเวลา (ตัดเงื่อนไข if(isRunning) ออก)
+        const camera = new Camera(videoElement, { onFrame: async () => { await pose.send({image: videoElement}); }, width: 480, height: 640, facingMode: "user" });
         
         camera.start().then(() => { 
-            isRunning = true; 
-            isCountdown = true; // 🌟 เปิดโหมดนับถอยหลังทันทีที่กล้องติด
-            countdownValue = 5;
-
-            // 🌟 ตั้งเวลาให้เลขลดลงทุกๆ 1 วินาที
-            let countdownInterval = setInterval(() => {
-                if (countdownValue > 1) {
-                    countdownValue--;
-                } else {
-                    clearInterval(countdownInterval);
-                    isCountdown = false; // ปลดล็อกให้เริ่มเกมได้
-                    document.getElementById('statusMsg').innerText = "🔥 ลุยเลย! ย่อให้สุด ยืดให้สุด";
-                    document.getElementById('statusMsg').style.color = "#22c55e";
-                }
-            }, 1000);
+            // เริ่มต้นที่เฟส 1 สแกนหาตัวผู้เล่น
+            document.getElementById('statusMsg').innerText = "🔍 ถอยหลังไปตั้งหลักให้กล้องเห็นเต็มตัวครับ";
+            document.getElementById('statusMsg').style.color = "#818cf8";
         });
     }
 
