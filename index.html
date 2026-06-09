@@ -46,12 +46,14 @@
         document.getElementById('statusMsg').innerText = "ผู้เล่น: " + username;
     }
 
-    const SQUAT_TARGET = 12;
+   const SQUAT_TARGET = 12;
     let counter = 0;
     let state = 'up';
     let isRunning = false;
+    let isCountdown = false; // 🌟 เพิ่มตัวแปรสถานะนับถอยหลัง
+    let countdownValue = 5;  // 🌟 เวลา 5 วินาที
 
-    // 2. ระบบ AI MediaPipe (โค้ดจะใช้งานกล้องได้ 100% เพราะไม่ได้อยู่ใน iFrame)
+    // 2. ระบบ AI MediaPipe 
     function startGame() {
         document.getElementById('btnStart').style.display = 'none';
         document.getElementById('statusMsg').innerText = "กำลังเชื่อมต่อกล้อง...";
@@ -62,11 +64,9 @@
 
         const pose = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
         pose.setOptions({ modelComplexity: 0, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-       pose.onResults((results) => {
+        
+        pose.onResults((results) => {
             if (!isRunning) return;
-            const canvasElement = document.getElementById('canvas');
-            const canvasCtx = canvasElement.getContext('2d');
-            
             canvasElement.width = canvasElement.clientWidth;
             canvasElement.height = canvasElement.clientHeight;
             canvasCtx.save();
@@ -77,14 +77,12 @@
                 drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#ffffff', lineWidth: 3});
                 drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#6366f1', lineWidth: 2, radius: 4});
 
-                // ดึงจุดข้อต่อที่ต้องใช้งาน
                 let nose = results.poseLandmarks[0];
-                let shoulder = results.poseLandmarks[11]; // ไหล่ซ้าย
-                let hip = results.poseLandmarks[23];      // สะโพกซ้าย
-                let knee = results.poseLandmarks[25];     // เข่าซ้าย
-                let ankle = results.poseLandmarks[27];    // ข้อเท้าซ้าย
+                let shoulder = results.poseLandmarks[11]; 
+                let hip = results.poseLandmarks[23];      
+                let knee = results.poseLandmarks[25];     
+                let ankle = results.poseLandmarks[27];    
                 
-                // ถ้าฝั่งขวาชัดกว่า ให้สลับไปใช้ฝั่งขวา
                 if (results.poseLandmarks[24].visibility > results.poseLandmarks[23].visibility) {
                     shoulder = results.poseLandmarks[12];
                     hip = results.poseLandmarks[24]; 
@@ -92,7 +90,7 @@
                     ankle = results.poseLandmarks[28];
                 }
 
-                // 🛡️ Anti-Cheat ชั้นที่ 1: ต้องเห็นเต็มตัวตั้งแต่ จมูก ถึง ข้อเท้า (ค่าความชัดต้องเกิน 65%)
+                // 🛡️ Anti-Cheat ชั้นที่ 1: ต้องเห็นเต็มตัวตั้งแต่ จมูก ถึง ข้อเท้า (ทำงานแม้ตอนนับถอยหลัง)
                 if (nose.visibility < 0.65 || shoulder.visibility < 0.65 || hip.visibility < 0.65 || knee.visibility < 0.65 || ankle.visibility < 0.65) {
                     document.getElementById('statusMsg').innerText = "⚠️ ถอยหลังอีกนิดครับ ให้กล้องเห็นตั้งแต่หัวจรดเท้า";
                     document.getElementById('statusMsg').style.color = "#fca5a5"; 
@@ -100,8 +98,15 @@
                     return; 
                 }
 
+                // 🌟 ระบบนับถอยหลัง 5 วินาที: ถ้ายืนเข้าเฟรมเต็มตัวแล้ว ให้โชว์เวลานับถอยหลัง
+                if (isCountdown) {
+                    document.getElementById('statusMsg').innerText = `⏳ เตรียมตัว... เริ่มใน ${countdownValue} วินาที`;
+                    document.getElementById('statusMsg').style.color = "#fbbf24";
+                    canvasCtx.restore();
+                    return; // หยุดคำสั่งนับแต้มไว้ก่อน จนกว่าจะหมดเวลา
+                }
+
                 // 🛡️ Anti-Cheat ชั้นที่ 2: ป้องกันการนั่งเล่น หรือนอนเขย่า 
-                // (แกน Y บนจอคือ 0 ด้านล่างคือ 1 ดังนั้นจมูกและไหล่ต้องค่าน้อยกว่าสะโพกเสมอ)
                 if (nose.y >= hip.y || shoulder.y >= hip.y) {
                     document.getElementById('statusMsg').innerText = "⚠️ ไม่เนียนครับ! ลุกขึ้นยืนตรงๆ ให้กล้องเห็นชัดๆ";
                     document.getElementById('statusMsg').style.color = "#fca5a5"; 
@@ -109,41 +114,37 @@
                     return; 
                 }
 
-                // คำนวณองศาข้อเข่า
                 let angle = Math.abs((Math.atan2(ankle.y - knee.y, ankle.x - knee.x) - Math.atan2(hip.y - knee.y, hip.x - knee.x)) * 180.0 / Math.PI);
                 if (angle > 180.0) angle = 360 - angle;
 
-                // 🛡️ Anti-Cheat ชั้นที่ 3: ตัวแปรจับเวลาป้องกันการเขย่าแบบเดอะแฟลช
+                // 🛡️ Anti-Cheat ชั้นที่ 3: ตัวแปรจับเวลาความเร็ว
                 window.lastRepTime = window.lastRepTime || 0;
                 let currentTime = new Date().getTime();
 
-                // ⬇️ จังหวะย่อตัว (Deep Squat)
                 if (angle < 95 && hip.y >= knee.y - 0.15) {
                     if (state === 'up') { 
                         state = 'down'; 
                         document.getElementById('statusMsg').innerText = "⬇️ ลึกพอแล้ว! ดันตัวขึ้นเลย!"; 
                         document.getElementById('statusMsg').style.color = "#22c55e"; 
                         
-                        // 🎵 โบนัส: ส่งเสียงตื๊ดสั้นๆ ให้รู้ว่าย่อลงถึงจุดที่ AI ยอมรับแล้ว
                         try {
                             let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                             let osc = audioCtx.createOscillator();
                             osc.type = 'sine';
-                            osc.frequency.setValueAtTime(600, audioCtx.currentTime); // โทนเสียงความถี่ 600Hz
+                            osc.frequency.setValueAtTime(600, audioCtx.currentTime); 
                             osc.connect(audioCtx.destination);
                             osc.start();
-                            osc.stop(audioCtx.currentTime + 0.15); // ดังแค่ 0.15 วินาที
+                            osc.stop(audioCtx.currentTime + 0.15); 
                         } catch(e) {}
                     }
                 } 
-                // ⬆️ จังหวะยืนขึ้น (ต้องยืนให้ตรง และสะโพกต้องเด้งกลับไปสูงกว่าเข่า)
                 else if (angle > 160 && hip.y < knee.y - 0.2) { 
                     if (state === 'down') {
-                        // 🛡️ Anti-Cheat ชั้นที่ 4: ความเร็ว (คนจริงสควอต 1 ครั้งต้องใช้เวลาอย่างน้อย 1 วินาที)
+                        // 🛡️ Anti-Cheat ชั้นที่ 4: ความเร็ว (จำกัดที่ 1 วินาที/ครั้ง)
                         if (currentTime - window.lastRepTime > 1000) {
                             state = 'up';
                             counter++;
-                            window.lastRepTime = currentTime; // อัปเดตเวลาที่ทำสำเร็จ
+                            window.lastRepTime = currentTime; 
                             
                             document.getElementById('counter').innerHTML = counter + `<span style="font-size: 20px; color:#94a3b8;">/${SQUAT_TARGET}</span>`;
                             document.getElementById('statusMsg').innerText = "⬆️ เยี่ยม! ทำต่อไป!";
@@ -154,8 +155,7 @@
                                 sendDataToGAS();
                             }
                         } else {
-                            // จับได้ว่านั่งเขย่ามือถือ หรือย่อลุกเร็วผิดมนุษย์
-                            state = 'up'; // บังคับให้เริ่มย่อใหม่ แต่ไม่แจกแต้มให้
+                            state = 'up'; 
                             document.getElementById('statusMsg').innerText = "⚠️ เร็วไปครับ! ย่อ-ยืด ช้าๆ ให้โดนกล้ามเนื้อ";
                             document.getElementById('statusMsg').style.color = "#fca5a5";
                         }
@@ -166,7 +166,24 @@
         });
 
         const camera = new Camera(videoElement, { onFrame: async () => { if(isRunning) await pose.send({image: videoElement}); }, width: 480, height: 640, facingMode: "user" });
-        camera.start().then(() => { isRunning = true; document.getElementById('statusMsg').innerText = "🔥 ลุยเลย! ย่อให้สุด ยืดให้สุด"; });
+        
+        camera.start().then(() => { 
+            isRunning = true; 
+            isCountdown = true; // 🌟 เปิดโหมดนับถอยหลังทันทีที่กล้องติด
+            countdownValue = 5;
+
+            // 🌟 ตั้งเวลาให้เลขลดลงทุกๆ 1 วินาที
+            let countdownInterval = setInterval(() => {
+                if (countdownValue > 1) {
+                    countdownValue--;
+                } else {
+                    clearInterval(countdownInterval);
+                    isCountdown = false; // ปลดล็อกให้เริ่มเกมได้
+                    document.getElementById('statusMsg').innerText = "🔥 ลุยเลย! ย่อให้สุด ยืดให้สุด";
+                    document.getElementById('statusMsg').style.color = "#22c55e";
+                }
+            }, 1000);
+        });
     }
 
     // 3. ส่งข้อมูลกลับไปที่ API บน Google Apps Script เมื่อทำครบ
