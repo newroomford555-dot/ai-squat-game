@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Deep Squat Challenge</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+    <style>
+        body { font-family: 'Kanit', sans-serif; background-color: #0f172a; color: white; text-align: center; margin: 0; padding: 20px; }
+        .container { max-width: 400px; margin: 0 auto; }
+        .video-container { position: relative; width: 100%; aspect-ratio: 3/4; background: #1e293b; border-radius: 16px; overflow: hidden; border: 2px solid #334155; margin-bottom: 20px; }
+        canvas { width: 100%; height: 100%; object-fit: cover; }
+        .counter { font-size: 60px; font-weight: 900; color: #818cf8; margin: 10px 0; }
+        .btn { background-color: #6366f1; color: white; border: none; padding: 15px 20px; border-radius: 12px; font-size: 18px; font-weight: bold; width: 100%; cursor: pointer; }
+        .btn:disabled { background-color: #475569; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2 style="color: #818cf8; margin-top:0;">Deep Squat Challenge</h2>
+    <p id="statusMsg">รอเริ่มเกม...</p>
+
+    <div class="video-container">
+        <video id="video" style="display: none;" playsinline></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div class="counter" id="counter">0<span style="font-size: 20px; color:#94a3b8;">/12</span></div>
+    
+    <button class="btn" id="btnStart" onclick="startGame()">🎥 เปิดกล้องเริ่มลุย!</button>
+</div>
+
+<script>
+    // 1. ดึงข้อมูล User และ URL ขากลับ จากลิงก์ (URL Parameters)
+    const urlParams = new URLSearchParams(window.location.search);
+    const username = urlParams.get('user');
+    const returnUrl = urlParams.get('returnUrl');
+
+    if(!username) {
+        document.getElementById('statusMsg').innerText = "❌ ไม่พบชื่อผู้ใช้งาน กรุณากลับไปเข้าสู่ระบบใหม่";
+        document.getElementById('btnStart').style.display = 'none';
+    } else {
+        document.getElementById('statusMsg').innerText = "ผู้เล่น: " + username;
+    }
+
+    const SQUAT_TARGET = 12;
+    let counter = 0;
+    let state = 'up';
+    let isRunning = false;
+
+    // 2. ระบบ AI MediaPipe (โค้ดจะใช้งานกล้องได้ 100% เพราะไม่ได้อยู่ใน iFrame)
+    function startGame() {
+        document.getElementById('btnStart').style.display = 'none';
+        document.getElementById('statusMsg').innerText = "กำลังเชื่อมต่อกล้อง...";
+
+        const videoElement = document.getElementById('video');
+        const canvasElement = document.getElementById('canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+
+        const pose = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
+        pose.setOptions({ modelComplexity: 0, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        pose.onResults((results) => {
+            if (!isRunning) return;
+            canvasElement.width = canvasElement.clientWidth;
+            canvasElement.height = canvasElement.clientHeight;
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.poseLandmarks) {
+                drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#ffffff', lineWidth: 3});
+                drawLandmarks(canvasCtx, results.poseLandmarks, {color: '#6366f1', lineWidth: 2, radius: 4});
+
+                let hip = results.poseLandmarks[23]; let knee = results.poseLandmarks[25]; let ankle = results.poseLandmarks[27];
+                if (results.poseLandmarks[24].visibility > results.poseLandmarks[23].visibility) {
+                    hip = results.poseLandmarks[24]; knee = results.poseLandmarks[26]; ankle = results.poseLandmarks[28];
+                }
+
+                let angle = Math.abs((Math.atan2(ankle.y - knee.y, ankle.x - knee.x) - Math.atan2(hip.y - knee.y, hip.x - knee.x)) * 180.0 / Math.PI);
+                if (angle > 180.0) angle = 360 - angle;
+
+                if (angle < 95 && hip.y >= knee.y - 0.1) {
+                    if (state === 'up') { state = 'down'; document.getElementById('statusMsg').innerText = "⬇️ ลงได้สวย! ดันตัวขึ้นเลย!"; document.getElementById('statusMsg').style.color = "#22c55e"; }
+                } else if (angle > 160) {
+                    if (state === 'down') {
+                        state = 'up';
+                        counter++;
+                        document.getElementById('counter').innerHTML = counter + `<span style="font-size: 20px; color:#94a3b8;">/${SQUAT_TARGET}</span>`;
+                        document.getElementById('statusMsg').innerText = "⬆️ เยี่ยม! ทำต่อไป!";
+                        document.getElementById('statusMsg').style.color = "#c7d2fe";
+
+                        if (counter >= SQUAT_TARGET) {
+                            isRunning = false;
+                            sendDataToGAS();
+                        }
+                    }
+                }
+            }
+            canvasCtx.restore();
+        });
+
+        const camera = new Camera(videoElement, { onFrame: async () => { if(isRunning) await pose.send({image: videoElement}); }, width: 480, height: 640, facingMode: "user" });
+        camera.start().then(() => { isRunning = true; document.getElementById('statusMsg').innerText = "🔥 ลุยเลย! ย่อให้สุด ยืดให้สุด"; });
+    }
+
+    // 3. ส่งข้อมูลกลับไปที่ API บน Google Apps Script เมื่อทำครบ
+    async function sendDataToGAS() {
+        document.getElementById('statusMsg').innerHTML = "🎉 สำเร็จ!<br>กำลังส่งแต้มและพากลับไปหน้าหลัก...";
+        document.getElementById('statusMsg').style.color = "#fbbf24";
+        
+        // URL ของ API ที่คุณเพิ่งสร้างจาก doPost
+        const API_URL = "https://script.google.com/macros/s/AKfycbyVrBPGDAm3ie8GhUu8NXayaAZpxLYbQtsv1UE8xpXgUTv3D56NxB-SPk19Zh0eHK8/exec";
+        
+        try {
+            await fetch(API_URL, {
+                method: "POST",
+                mode: "no-cors", // จำเป็นสำหรับ GAS ยิงข้ามโดเมน
+                body: JSON.stringify({ action: "completeSquatMission", username: username })
+            });
+            
+            // รอเล็กน้อยให้เซิร์ฟเวอร์บันทึกข้อมูล แล้ว "ดีด" กลับแอปหลัก
+            setTimeout(() => {
+                window.location.href = returnUrl; 
+            }, 1500);
+
+        } catch (e) {
+            document.getElementById('statusMsg').innerText = "❌ เกิดข้อผิดพลาดในการส่งข้อมูล";
+        }
+    }
+</script>
+</body>
+</html>
