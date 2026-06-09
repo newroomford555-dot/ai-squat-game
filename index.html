@@ -46,7 +46,7 @@
         document.getElementById('statusMsg').innerText = "ผู้เล่น: " + username;
     }
 
-  const SQUAT_TARGET = 12;
+    const SQUAT_TARGET = 12;
     let counter = 0;
     let state = 'up';
     
@@ -57,12 +57,15 @@
     let isWaitingForButton = false;
     let hasBodyBeenDetectedOnce = false;
 
+    // 🌟 ตัวแปรสำหรับระบบเสียง (ป้องกันบราวเซอร์จำกัดจำนวน AudioContext)
+    let audioCtx = null;
+
     // 2. ระบบ AI MediaPipe 
     function startGame() {
         document.getElementById('btnStart').style.display = 'none';
         document.getElementById('statusMsg').innerText = "กำลังเชื่อมต่อกล้อง...";
 
-        // 🌟 สร้างหน้าต่าง Popup ซ้อนทับวิดีโอ (สร้างผ่าน JS เพื่อไม่ให้กระทบ HTML เดิม)
+        // สร้างหน้าต่าง Popup ซ้อนทับวิดีโอ
         if (!document.getElementById('readyPopup')) {
             let popup = document.createElement('div');
             popup.id = 'readyPopup';
@@ -71,7 +74,7 @@
             popup.style.left = '0';
             popup.style.width = '100%';
             popup.style.height = '100%';
-            popup.style.backgroundColor = 'rgba(15, 23, 42, 0.85)'; // สีทึบโปร่งแสง
+            popup.style.backgroundColor = 'rgba(15, 23, 42, 0.85)';
             popup.style.display = 'none';
             popup.style.flexDirection = 'column';
             popup.style.justifyContent = 'center';
@@ -92,6 +95,14 @@
                 isCountdown = true;
                 countdownValue = 5;
                 
+                // 🎵 โหลดระบบเสียงเตรียมไว้ทันทีที่ผู้ใช้กดปุ่ม (ตามกฎความปลอดภัยของบราวเซอร์)
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+                
                 // เริ่มทำงานตัวนับเวลา
                 let countdownInterval = setInterval(() => {
                     if (countdownValue > 1) {
@@ -100,7 +111,7 @@
                     } else {
                         clearInterval(countdownInterval);
                         isCountdown = false; 
-                        isRunning = true; // เปิดโหมดจับท่าทางสควอตเต็มตัว!
+                        isRunning = true; // เปิดโหมดจับท่าทางสควอต
                         document.getElementById('statusMsg').innerText = "🔥 ลุยเลย! ย่อให้สุด ยืดให้สุด";
                         document.getElementById('statusMsg').style.color = "#22c55e";
                     }
@@ -116,7 +127,6 @@
         pose.setOptions({ modelComplexity: 0, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
         
         pose.onResults((results) => {
-            // วาดโครงกระดูกให้เห็นตลอดเวลา (แม้ตอนยังไม่ได้เริ่มเกม) จะได้กะระยะถูก
             canvasElement.width = canvasElement.clientWidth;
             canvasElement.height = canvasElement.clientHeight;
             canvasCtx.save();
@@ -140,10 +150,9 @@
                     ankle = results.poseLandmarks[28];
                 }
 
-                // เช็คว่าอยู่ในระยะกล้องเห็นครบตั้งแต่หัวจรดเท้าหรือไม่
                 let isVisible = (nose.visibility >= 0.65 && shoulder.visibility >= 0.65 && hip.visibility >= 0.65 && knee.visibility >= 0.65 && ankle.visibility >= 0.65);
 
-                // 🌟 เฟสที่ 1: สแกนหาร่างกายครั้งแรก
+                // เฟสที่ 1: สแกนหาร่างกายครั้งแรก
                 if (!hasBodyBeenDetectedOnce) {
                     if (!isVisible) {
                         document.getElementById('statusMsg').innerText = "⚠️ ถอยหลังอีกนิดครับ ให้กล้องเห็นตั้งแต่หัวจรดเท้า";
@@ -151,7 +160,6 @@
                         canvasCtx.restore();
                         return; 
                     } else {
-                        // พอเห็นเต็มตัวครั้งแรกปุ๊บ เปิด Popup ปุ่มกดทันที
                         hasBodyBeenDetectedOnce = true;
                         isWaitingForButton = true;
                         document.getElementById('readyPopup').style.display = 'flex';
@@ -162,13 +170,13 @@
                     }
                 }
 
-                // 🌟 เฟสที่ 2: โชว์หน้าต่าง Popup รอผู้ใช้กดปุ่ม (พักการคำนวณ)
+                // เฟสที่ 2: โชว์หน้าต่าง Popup
                 if (isWaitingForButton) {
                     canvasCtx.restore();
                     return;
                 }
 
-                // 🌟 เฟสที่ 3: กำลังนับถอยหลัง 5 วินาที
+                // เฟสที่ 3: กำลังนับถอยหลัง
                 if (isCountdown) {
                     document.getElementById('statusMsg').innerText = `⏳ รีบเดินกลับไปยืนจุดเดิม... (${countdownValue} วิ)`;
                     document.getElementById('statusMsg').style.color = "#fbbf24";
@@ -176,13 +184,13 @@
                     return; 
                 }
 
-                // 🌟 เฟสที่ 4: เกมเริ่ม! (ต้องอยู่ในโหมด isRunning เท่านั้น)
+                // เฟสที่ 4: เกมเริ่ม!
                 if (!isRunning) {
                     canvasCtx.restore();
                     return;
                 }
 
-                // 🛡️ Anti-Cheat ชั้นที่ 1: ตรวจเช็คระหว่างเล่นว่าหลุดเฟรมหรือไม่
+                // Anti-Cheat
                 if (!isVisible) {
                     document.getElementById('statusMsg').innerText = "⚠️ หลุดเฟรม! ถอยหลังให้เห็นเต็มตัวอีกครั้ง";
                     document.getElementById('statusMsg').style.color = "#fca5a5"; 
@@ -190,7 +198,6 @@
                     return; 
                 }
 
-                // 🛡️ Anti-Cheat ชั้นที่ 2: ป้องกันการนั่งเล่น หรือนอนเขย่า 
                 if (nose.y >= hip.y || shoulder.y >= hip.y) {
                     document.getElementById('statusMsg').innerText = "⚠️ ไม่เนียนครับ! ลุกขึ้นยืนตรงๆ ให้กล้องเห็นชัดๆ";
                     document.getElementById('statusMsg').style.color = "#fca5a5"; 
@@ -201,7 +208,6 @@
                 let angle = Math.abs((Math.atan2(ankle.y - knee.y, ankle.x - knee.x) - Math.atan2(hip.y - knee.y, hip.x - knee.x)) * 180.0 / Math.PI);
                 if (angle > 180.0) angle = 360 - angle;
 
-                // 🛡️ Anti-Cheat ชั้นที่ 3: ตัวแปรจับเวลาความเร็ว
                 window.lastRepTime = window.lastRepTime || 0;
                 let currentTime = new Date().getTime();
 
@@ -212,21 +218,22 @@
                         document.getElementById('statusMsg').innerText = "⬇️ ลึกพอแล้ว! ดันตัวขึ้นเลย!"; 
                         document.getElementById('statusMsg').style.color = "#22c55e"; 
                         
+                        // 🎵 เรียกใช้เสียงตื๊ดจาก AudioContext ที่สร้างไว้แล้ว
                         try {
-                            let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                            let osc = audioCtx.createOscillator();
-                            osc.type = 'sine';
-                            osc.frequency.setValueAtTime(600, audioCtx.currentTime); 
-                            osc.connect(audioCtx.destination);
-                            osc.start();
-                            osc.stop(audioCtx.currentTime + 0.15); 
+                            if (audioCtx) {
+                                let osc = audioCtx.createOscillator();
+                                osc.type = 'sine';
+                                osc.frequency.setValueAtTime(600, audioCtx.currentTime); 
+                                osc.connect(audioCtx.destination);
+                                osc.start();
+                                osc.stop(audioCtx.currentTime + 0.15); 
+                            }
                         } catch(e) {}
                     }
                 } 
                 // ⬆️ จังหวะยืนขึ้น
                 else if (angle > 160 && hip.y < knee.y - 0.2) { 
                     if (state === 'down') {
-                        // 🛡️ Anti-Cheat ชั้นที่ 4: ความเร็ว (จำกัดที่ 1 วินาที/ครั้ง)
                         if (currentTime - window.lastRepTime > 1000) {
                             state = 'up';
                             counter++;
@@ -251,11 +258,9 @@
             canvasCtx.restore();
         });
 
-        // 🌟 แก้ไขจุดนี้: สั่งให้กล้องส่งภาพไปให้ AI ประมวลผลตลอดเวลา (ตัดเงื่อนไข if(isRunning) ออก)
         const camera = new Camera(videoElement, { onFrame: async () => { await pose.send({image: videoElement}); }, width: 480, height: 640, facingMode: "user" });
         
         camera.start().then(() => { 
-            // เริ่มต้นที่เฟส 1 สแกนหาตัวผู้เล่น
             document.getElementById('statusMsg').innerText = "🔍 ถอยหลังไปตั้งหลักให้กล้องเห็นเต็มตัวครับ";
             document.getElementById('statusMsg').style.color = "#818cf8";
         });
@@ -266,17 +271,15 @@
         document.getElementById('statusMsg').innerHTML = "🎉 สำเร็จ!<br>กำลังส่งแต้มและพากลับไปหน้าหลัก...";
         document.getElementById('statusMsg').style.color = "#fbbf24";
         
-        // URL ของ API ที่คุณเพิ่งสร้างจาก doPost
         const API_URL = "https://script.google.com/macros/s/AKfycbyVrBPGDAm3ie8GhUu8NXayaAZpxLYbQtsv1UE8xpXgUTv3D56NxB-SPk19Zh0eHK8/exec";
         
         try {
             await fetch(API_URL, {
                 method: "POST",
-                mode: "no-cors", // จำเป็นสำหรับ GAS ยิงข้ามโดเมน
+                mode: "no-cors", 
                 body: JSON.stringify({ action: "completeSquatMission", username: username })
             });
             
-            // รอเล็กน้อยให้เซิร์ฟเวอร์บันทึกข้อมูล แล้ว "ดีด" กลับแอปหลัก
             setTimeout(() => {
                 window.location.href = returnUrl; 
             }, 1500);
