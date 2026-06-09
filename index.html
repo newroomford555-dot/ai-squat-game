@@ -79,11 +79,24 @@
                     hip = results.poseLandmarks[24]; knee = results.poseLandmarks[26]; ankle = results.poseLandmarks[28];
                 }
 
+                // 🌟 ระบบป้องกันผีผลัก: เช็คว่ากล้องเห็นข้อต่อ (สะโพก, เข่า, ข้อเท้า) ชัดเจนหรือไม่
+                // ค่า visibility เต็มคือ 1.0 (ถ้าต่ำกว่า 0.6 ถือว่าเห็นไม่ชัด หรือ AI กำลังมั่ว)
+                if (hip.visibility < 0.6 || knee.visibility < 0.6 || ankle.visibility < 0.6) {
+                    document.getElementById('statusMsg').innerText = "⚠️ ถอยหลังนิดนึงครับ ให้กล้องเห็นเต็มตัวถึงข้อเท้า";
+                    document.getElementById('statusMsg').style.color = "#fca5a5"; // แจ้งเตือนสีแดงอ่อน
+                    canvasCtx.restore();
+                    return; // หยุดการทำงานส่วนคำนวณองศาทันที ถ้ายืนไม่เต็มตัว
+                }
+
                 let angle = Math.abs((Math.atan2(ankle.y - knee.y, ankle.x - knee.x) - Math.atan2(hip.y - knee.y, hip.x - knee.x)) * 180.0 / Math.PI);
                 if (angle > 180.0) angle = 360 - angle;
 
                 if (angle < 95 && hip.y >= knee.y - 0.1) {
-                    if (state === 'up') { state = 'down'; document.getElementById('statusMsg').innerText = "⬇️ ลงได้สวย! ดันตัวขึ้นเลย!"; document.getElementById('statusMsg').style.color = "#22c55e"; }
+                    if (state === 'up') { 
+                        state = 'down'; 
+                        document.getElementById('statusMsg').innerText = "⬇️ ลงได้สวย! ดันตัวขึ้นเลย!"; 
+                        document.getElementById('statusMsg').style.color = "#22c55e"; 
+                    }
                 } else if (angle > 160) {
                     if (state === 'down') {
                         state = 'up';
